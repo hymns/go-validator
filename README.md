@@ -1,6 +1,6 @@
 # go-validator
 
-[![Go Version](https://img.shields.io/badge/go-1.24.0-blue.svg)](https://golang.org/dl/) [![GoDoc](https://godoc.org/github.com/hymns/go-validator?status.svg)](https://pkg.go.dev/github.com/hymns/go-validator) [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/hymns/go-validator)](https://github.com/hymns/go-validator/releases) [![Go Version](https://img.shields.io/badge/go-1.24.0-blue.svg)](https://golang.org/dl/) [![Go Report Card](https://goreportcard.com/badge/github.com/hymns/go-validator)](https://goreportcard.com/report/github.com/hymns/go-validator) [![GoDoc](https://godoc.org/github.com/hymns/go-validator?status.svg)](https://pkg.go.dev/github.com/hymns/go-validator) [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 A Laravel-inspired validation package for Go. No struct tags required — pass your data as a plain map and declare rules as pipe-separated strings.
 
