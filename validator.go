@@ -13,6 +13,7 @@ type Validator struct {
 	customMsg Messages
 	errors    ErrorBag
 	validated bool
+	bailMode  bool
 	db        *sql.DB
 }
 
@@ -35,6 +36,12 @@ func Make(input Input, rules Rules) *Validator {
 // Messages sets custom error messages and returns the validator for chaining.
 func (v *Validator) Messages(msgs Messages) *Validator {
 	v.customMsg = msgs
+	return v
+}
+
+// Bail stops validation after the first field that has an error.
+func (v *Validator) Bail() *Validator {
+	v.bailMode = true
 	return v
 }
 
@@ -62,146 +69,181 @@ func (v *Validator) run() {
 	v.validated = true
 
 	for field, ruleStr := range v.rules {
-		_, fieldPresent := v.input[field]
-		val := v.input[field]
-		parts := strings.Split(ruleStr, "|")
-
-		hasRequired := false
-		isNullable := false
-		effectiveRequired := false
-
-		// Parse rule names first pass — detect nullable/required/flow conditions.
-		for _, p := range parts {
-			name, param := parseRule(p)
-			switch name {
-			case "required":
-				hasRequired = true
-				effectiveRequired = true
-			case "nullable":
-				isNullable = true
-			}
-			_ = param
-		}
-
-		// ── Presence rules (present, filled) ──────────────────────────────────
-		for _, p := range parts {
-			name, _ := parseRule(p)
-
-			if name == "present" {
-				if !fieldPresent {
-					msg := buildMsg("present", field, "")
-					v.errors[field] = append(v.errors[field], v.resolve(field, "present", msg))
-				}
-				// present only checks existence, does not block further validation
+		// ── Array wildcard (e.g. "tags.*") ────────────────────────────────────
+		if strings.HasSuffix(field, ".*") {
+			baseField := strings.TrimSuffix(field, ".*")
+			arr, ok := getNestedValue(v.input, baseField)
+			if !ok {
 				continue
 			}
-
-			if name == "filled" {
-				if fieldPresent && isEmpty(val) {
-					msg := buildMsg("filled", field, "")
-					v.errors[field] = append(v.errors[field], v.resolve(field, "filled", msg))
-					goto nextField
-				}
+			items, ok := arr.([]any)
+			if !ok {
 				continue
 			}
-		}
-
-		// ── Conditional required rules ────────────────────────────────────────
-		for _, p := range parts {
-			name, param := parseRule(p)
-			switch name {
-			case "required_if":
-				ps := splitParam(param)
-				if len(ps) >= 2 && fmt.Sprintf("%v", v.input[ps[0]]) == ps[1] {
-					effectiveRequired = true
-				}
-			case "required_unless":
-				ps := splitParam(param)
-				if len(ps) >= 2 && fmt.Sprintf("%v", v.input[ps[0]]) != ps[1] {
-					effectiveRequired = true
-				}
-			case "required_with":
-				for _, f := range splitParam(param) {
-					if !isEmpty(v.input[f]) {
-						effectiveRequired = true
-						break
-					}
-				}
-			case "required_without":
-				for _, f := range splitParam(param) {
-					if isEmpty(v.input[f]) {
-						effectiveRequired = true
-						break
-					}
-				}
-			case "required_with_all":
-				allPresent := true
-				for _, f := range splitParam(param) {
-					if isEmpty(v.input[f]) {
-						allPresent = false
-						break
-					}
-				}
-				if allPresent {
-					effectiveRequired = true
-				}
-			case "required_without_all":
-				allAbsent := true
-				for _, f := range splitParam(param) {
-					if !isEmpty(v.input[f]) {
-						allAbsent = false
-						break
-					}
-				}
-				if allAbsent {
-					effectiveRequired = true
-				}
+			for i, item := range items {
+				elemField := fmt.Sprintf("%s.%d", baseField, i)
+				v.validateSingle(elemField, item, ruleStr)
 			}
-		}
-
-		// ── Handle nullable nil shortcut ──────────────────────────────────────
-		if isNullable && val == nil {
-			goto nextField
-		}
-
-		// ── Handle empty value ────────────────────────────────────────────────
-		if isEmpty(val) {
-			if effectiveRequired {
-				// Find the triggering rule to emit the right message.
-				ruleName, msg := v.buildRequiredMsg(field, parts)
-				v.errors[field] = append(v.errors[field], v.resolve(field, ruleName, msg))
-			} else if !hasRequired {
-				// Optional field — skip further validation.
-				goto nextField
+			if v.bailMode && len(v.errors) > 0 {
+				return
 			}
-			goto nextField
+			continue
 		}
 
-		// ── Run check rules ───────────────────────────────────────────────────
-		for _, part := range parts {
-			name, param := parseRule(part)
-			if isFlowRule(name) {
-				continue
-			}
-			if msg := v.check(name, param, field, val); msg != "" {
-				v.errors[field] = append(v.errors[field], v.resolve(field, name, msg))
-				break
-			}
-		}
+		// ── Normal field validation ────────────────────────────────────────────
+		val, fieldPresent := getNestedValue(v.input, field)
+		v.validateSingle(field, val, ruleStr)
+		_ = fieldPresent
 
-	nextField:
+		if v.bailMode && len(v.errors) > 0 {
+			return
+		}
 	}
+}
+
+// validateSingle runs all rules for a single field/value pair.
+func (v *Validator) validateSingle(field string, val any, ruleStr string) {
+	parts := parseAndCache(ruleStr)
+
+	_, fieldPresent := getNestedValue(v.input, field)
+
+	hasRequired := false
+	isNullable := false
+	effectiveRequired := false
+
+	// Parse rule names first pass — detect nullable/required/flow conditions.
+	for _, p := range parts {
+		switch p.name {
+		case "required":
+			hasRequired = true
+			effectiveRequired = true
+		case "nullable":
+			isNullable = true
+		}
+	}
+
+	// ── Presence rules (present, filled) ──────────────────────────────────
+	for _, p := range parts {
+		if p.name == "present" {
+			if !fieldPresent {
+				msg := buildMsg("present", field, "")
+				v.errors[field] = append(v.errors[field], v.resolve(field, "present", msg))
+			}
+			continue
+		}
+
+		if p.name == "filled" {
+			if fieldPresent && isEmpty(val) {
+				msg := buildMsg("filled", field, "")
+				v.errors[field] = append(v.errors[field], v.resolve(field, "filled", msg))
+				return
+			}
+			continue
+		}
+	}
+
+	// ── Conditional required rules ────────────────────────────────────────
+	for _, p := range parts {
+		switch p.name {
+		case "required_if":
+			ps := splitParam(p.param)
+			if len(ps) >= 2 && fmt.Sprintf("%v", v.input[ps[0]]) == ps[1] {
+				effectiveRequired = true
+			}
+		case "required_unless":
+			ps := splitParam(p.param)
+			if len(ps) >= 2 && fmt.Sprintf("%v", v.input[ps[0]]) != ps[1] {
+				effectiveRequired = true
+			}
+		case "required_with":
+			for _, f := range splitParam(p.param) {
+				if !isEmpty(v.input[f]) {
+					effectiveRequired = true
+					break
+				}
+			}
+		case "required_without":
+			for _, f := range splitParam(p.param) {
+				if isEmpty(v.input[f]) {
+					effectiveRequired = true
+					break
+				}
+			}
+		case "required_with_all":
+			allPresent := true
+			for _, f := range splitParam(p.param) {
+				if isEmpty(v.input[f]) {
+					allPresent = false
+					break
+				}
+			}
+			if allPresent {
+				effectiveRequired = true
+			}
+		case "required_without_all":
+			allAbsent := true
+			for _, f := range splitParam(p.param) {
+				if !isEmpty(v.input[f]) {
+					allAbsent = false
+					break
+				}
+			}
+			if allAbsent {
+				effectiveRequired = true
+			}
+		}
+	}
+
+	// ── Handle nullable nil shortcut ──────────────────────────────────────
+	if isNullable && val == nil {
+		return
+	}
+
+	// ── Handle empty value ────────────────────────────────────────────────
+	if isEmpty(val) {
+		if effectiveRequired {
+			ruleName, msg := v.buildRequiredMsg(field, parts)
+			v.errors[field] = append(v.errors[field], v.resolve(field, ruleName, msg))
+		} else if !hasRequired {
+			// Optional field — skip further validation.
+		}
+		return
+	}
+
+	// ── Run check rules ───────────────────────────────────────────────────
+	fieldBail := hasBail(parts)
+	for _, p := range parts {
+		if isFlowRule(p.name) {
+			continue
+		}
+		if msg := v.check(p.name, p.param, field, val); msg != "" {
+			v.errors[field] = append(v.errors[field], v.resolve(field, p.name, msg))
+			if fieldBail {
+				return
+			}
+			break
+		}
+	}
+}
+
+// hasBail reports whether "bail" appears in a rule set.
+func hasBail(parts []parsedRule) bool {
+	for _, p := range parts {
+		if p.name == "bail" {
+			return true
+		}
+	}
+	return false
 }
 
 // buildRequiredMsg finds the first triggered required-style rule and returns
 // the rule name and its formatted message.
-func (v *Validator) buildRequiredMsg(field string, parts []string) (ruleName, msg string) {
+func (v *Validator) buildRequiredMsg(field string, parts []parsedRule) (ruleName, msg string) {
 	for _, p := range parts {
-		name, param := parseRule(p)
-		ps := splitParam(param)
-		switch name {
+		ps := splitParam(p.param)
+		switch p.name {
 		case "required":
-			return "required", buildMsg("required", field, param)
+			return "required", buildMsg("required", field, p.param)
 		case "required_if":
 			if len(ps) >= 2 && fmt.Sprintf("%v", v.input[ps[0]]) == ps[1] {
 				return "required_if", buildMsgWith("required_if", map[string]string{
@@ -269,7 +311,7 @@ func (v *Validator) buildRequiredMsg(field string, parts []string) (ruleName, ms
 	return "required", buildMsg("required", field, "")
 }
 
-// isFlowRule returns true for rules that are handled in run() and should not
+// isFlowRule returns true for rules that are handled in validateSingle() and should not
 // be passed to check().
 func isFlowRule(name string) bool {
 	switch name {

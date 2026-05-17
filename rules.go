@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -19,7 +20,44 @@ var (
 	reUUID     = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 	reULID     = regexp.MustCompile(`^[0-9A-HJKMNP-TV-Z]{26}$`)
 	reHexColor = regexp.MustCompile(`^#([0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$`)
+	reEmail    = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
 )
+
+// parsedRule holds a pre-parsed rule name and optional parameter.
+type parsedRule struct{ name, param string }
+
+// ruleCache caches the parsed form of rule strings to avoid re-splitting on every validation call.
+var ruleCache sync.Map // key: string → []parsedRule
+
+// parseAndCache parses a pipe-separated rule string and caches the result.
+func parseAndCache(ruleStr string) []parsedRule {
+	if v, ok := ruleCache.Load(ruleStr); ok {
+		return v.([]parsedRule)
+	}
+	parts := strings.Split(ruleStr, "|")
+	result := make([]parsedRule, 0, len(parts))
+	for _, p := range parts {
+		n, param := parseRule(p)
+		result = append(result, parsedRule{n, param})
+	}
+	ruleCache.Store(ruleStr, result)
+	return result
+}
+
+// regexCache caches compiled user-supplied regex patterns (used by "regex" and "not_regex" rules).
+var regexCache sync.Map // key: string → *regexp.Regexp
+
+func compileRegex(pattern string) (*regexp.Regexp, error) {
+	if v, ok := regexCache.Load(pattern); ok {
+		return v.(*regexp.Regexp), nil
+	}
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return nil, err
+	}
+	regexCache.Store(pattern, re)
+	return re, nil
+}
 
 func (v *Validator) check(name, param, field string, value any) string {
 	if fn, ok := customRules[name]; ok {
@@ -85,8 +123,7 @@ func (v *Validator) check(name, param, field string, value any) string {
 		}
 
 	case "email":
-		re := regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
-		if !re.MatchString(str) {
+		if !reEmail.MatchString(str) {
 			return buildMsg("email", field, param)
 		}
 
@@ -152,7 +189,7 @@ func (v *Validator) check(name, param, field string, value any) string {
 		}
 
 	case "regex":
-		re, err := regexp.Compile(param)
+		re, err := compileRegex(param)
 		if err != nil || !re.MatchString(str) {
 			return buildMsg("regex", field, param)
 		}
@@ -419,7 +456,7 @@ func (v *Validator) check(name, param, field string, value any) string {
 		}
 
 	case "not_regex":
-		re, err := regexp.Compile(param)
+		re, err := compileRegex(param)
 		if err == nil && re.MatchString(str) {
 			return buildMsg("not_regex", field, param)
 		}
@@ -712,6 +749,19 @@ func parseDate(s string) (time.Time, error) {
 		}
 	}
 	return time.Time{}, fmt.Errorf("cannot parse date %q", s)
+}
+
+// getNestedValue resolves a dot-notation path (e.g. "user.address.postcode") from input.
+func getNestedValue(input Input, dotPath string) (any, bool) {
+	parts := strings.SplitN(dotPath, ".", 2)
+	val, ok := input[parts[0]]
+	if !ok || len(parts) == 1 {
+		return val, ok
+	}
+	if nested, ok := val.(map[string]any); ok {
+		return getNestedValue(Input(nested), parts[1])
+	}
+	return nil, false
 }
 
 func isEmpty(value any) bool {

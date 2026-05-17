@@ -2,7 +2,7 @@
 
 [![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/hymns/go-validator)](https://github.com/hymns/go-validator/releases) [![Go Version](https://img.shields.io/badge/go-1.24.0-blue.svg)](https://golang.org/dl/) [![Go Report Card](https://goreportcard.com/badge/github.com/hymns/go-validator)](https://goreportcard.com/report/github.com/hymns/go-validator) [![GoDoc](https://godoc.org/github.com/hymns/go-validator?status.svg)](https://pkg.go.dev/github.com/hymns/go-validator) [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-A Laravel-inspired validation package for Go. No struct tags required — pass your data as a plain map and declare rules as pipe-separated strings.
+A Laravel-inspired validation package for Go. No struct tags required — pass your data as a plain map and declare rules as pipe-separated strings or use the fluent typed builder.
 
 ## Installation
 
@@ -33,6 +33,16 @@ if v.Fails() {
 }
 ```
 
+Or use the **typed rule builder** for compile-time safety and IDE autocompletion:
+
+```go
+v := validator.Make(input, validator.Rules{
+    "email": validator.R().Required().Email().Max(100).Build(),
+    "age":   validator.R().Required().Integer().Min(18).Build(),
+    "role":  validator.R().Required().In("admin", "user").Build(),
+})
+```
+
 ## API
 
 ### `Make(input, rules) *Validator`
@@ -48,6 +58,23 @@ v := validator.Make(input, rules).Messages(validator.Messages{
     "email.required": "Email address is mandatory.",
     "email.email":    "That doesn't look like a valid email.",
 })
+```
+
+### `(*Validator).Bail() *Validator`
+
+Stop validation after the first field that produces an error (global bail). Useful when later fields depend on earlier ones passing.
+
+```go
+v := validator.Make(input, rules).Bail()
+```
+
+For per-field bail (stop checking remaining rules on that field on first failure), add `bail` to the rule string:
+
+```go
+validator.Rules{
+    "email": "bail|required|email|unique:users,email",
+    //         ↑ stops checking email rules on first failure
+}
 ```
 
 ### `(*Validator).WithDB(db *sql.DB) *Validator`
@@ -82,8 +109,6 @@ Rules are pipe-separated strings. Parameters are colon-separated from the rule n
 "required|unique:users,email"
 ```
 
-Validation stops at the first failing rule per field (bail-by-default).
-
 ### Presence & required
 
 | Rule | Description |
@@ -92,7 +117,7 @@ Validation stops at the first failing rule per field (bail-by-default).
 | `nullable` | Field may be `nil`; skips all other rules when `nil` |
 | `present` | Key must exist in input (value may be empty) |
 | `filled` | If key is present, value must not be empty |
-| `bail` | Stop on first error (already the default per field) |
+| `bail` | Stop checking remaining rules for this field on first failure |
 
 ### Conditional required
 
@@ -237,6 +262,76 @@ v := validator.Make(input, rules).Messages(validator.Messages{
 ```
 
 Available placeholders: `:field`, `:param`, `:other`, `:value`, `:min`, `:max`.
+
+## Typed rule builder
+
+`R()` returns a `*RuleBuilder`. Chain methods, then call `Build()` to produce the pipe-separated string. Both styles are fully compatible with `Make()`.
+
+```go
+validator.Rules{
+    // string style
+    "email": "required|email|max:100",
+
+    // typed builder — compile-safe, IDE autocomplete
+    "email": validator.R().Required().Email().Max(100).Build(),
+    "age":   validator.R().Required().Integer().Min(18).Build(),
+    "role":  validator.R().Required().In("admin", "user").Build(),
+    "slug":  validator.R().Required().Regex(`^[a-z0-9-]+$`).Build(),
+    "score": validator.R().Required().Numeric().Between(0, 100).Build(),
+}
+```
+
+Every built-in rule has a corresponding method. A few naming notes:
+
+| Rule string | Builder method |
+| ----------- | -------------- |
+| `string` | `.Str()` (reserved word in Go) |
+| `required_if:field,val` | `.RequiredIf("field", "val")` |
+| `starts_with:a,b` | `.StartsWith("a", "b")` |
+| `in:a,b,c` | `.In("a", "b", "c")` |
+| `unique:users,email` | `.Unique("users", "email")` |
+
+## Nested validation
+
+Use dot notation to validate fields inside nested maps:
+
+```go
+// Input
+{
+    "user": {
+        "name": "hamizi",
+        "address": {
+            "postcode": "50000"
+        }
+    }
+}
+
+// Rules
+validator.Make(input, validator.Rules{
+    "user.name":             "required|min:3",
+    "user.address.postcode": "required|digits:5",
+})
+```
+
+## Array wildcard
+
+Use `field.*` to validate every element of an array. Errors are keyed as `field.0`, `field.1`, etc.
+
+```go
+// Input
+{
+    "tags": ["laravel", "golang", ""]
+}
+
+// Rules
+validator.Make(input, validator.Rules{
+    "tags":   "required|array",
+    "tags.*": "required|string|min:2",
+})
+
+// Errors
+// tags.2 → ["The tags.2 field is required."]
+```
 
 ## Custom rules
 
