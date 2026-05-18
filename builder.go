@@ -145,24 +145,24 @@ func (rb *RuleBuilder) Different(otherField string) *RuleBuilder {
 
 // ── String rules ──────────────────────────────────────────────────────────────
 
-func (rb *RuleBuilder) Email() *RuleBuilder     { return rb.add("email") }
-func (rb *RuleBuilder) URL() *RuleBuilder       { return rb.add("url") }
-func (rb *RuleBuilder) UUID() *RuleBuilder      { return rb.add("uuid") }
-func (rb *RuleBuilder) ULID() *RuleBuilder      { return rb.add("ulid") }
-func (rb *RuleBuilder) JSON() *RuleBuilder      { return rb.add("json") }
-func (rb *RuleBuilder) Alpha() *RuleBuilder     { return rb.add("alpha") }
-func (rb *RuleBuilder) AlphaNum() *RuleBuilder  { return rb.add("alpha_num") }
-func (rb *RuleBuilder) AlphaDash() *RuleBuilder { return rb.add("alpha_dash") }
-func (rb *RuleBuilder) ASCII() *RuleBuilder     { return rb.add("ascii") }
-func (rb *RuleBuilder) Lowercase() *RuleBuilder { return rb.add("lowercase") }
-func (rb *RuleBuilder) Uppercase() *RuleBuilder { return rb.add("uppercase") }
-func (rb *RuleBuilder) HexColor() *RuleBuilder  { return rb.add("hex_color") }
+func (rb *RuleBuilder) Email() *RuleBuilder      { return rb.add("email") }
+func (rb *RuleBuilder) URL() *RuleBuilder        { return rb.add("url") }
+func (rb *RuleBuilder) UUID() *RuleBuilder       { return rb.add("uuid") }
+func (rb *RuleBuilder) ULID() *RuleBuilder       { return rb.add("ulid") }
+func (rb *RuleBuilder) JSON() *RuleBuilder       { return rb.add("json") }
+func (rb *RuleBuilder) Alpha() *RuleBuilder      { return rb.add("alpha") }
+func (rb *RuleBuilder) AlphaNum() *RuleBuilder   { return rb.add("alpha_num") }
+func (rb *RuleBuilder) AlphaDash() *RuleBuilder  { return rb.add("alpha_dash") }
+func (rb *RuleBuilder) ASCII() *RuleBuilder      { return rb.add("ascii") }
+func (rb *RuleBuilder) Lowercase() *RuleBuilder  { return rb.add("lowercase") }
+func (rb *RuleBuilder) Uppercase() *RuleBuilder  { return rb.add("uppercase") }
+func (rb *RuleBuilder) HexColor() *RuleBuilder   { return rb.add("hex_color") }
 func (rb *RuleBuilder) MACAddress() *RuleBuilder { return rb.add("mac_address") }
-func (rb *RuleBuilder) IP() *RuleBuilder        { return rb.add("ip") }
-func (rb *RuleBuilder) IPv4() *RuleBuilder      { return rb.add("ipv4") }
-func (rb *RuleBuilder) IPv6() *RuleBuilder      { return rb.add("ipv6") }
-func (rb *RuleBuilder) Timezone() *RuleBuilder  { return rb.add("timezone") }
-func (rb *RuleBuilder) Distinct() *RuleBuilder  { return rb.add("distinct") }
+func (rb *RuleBuilder) IP() *RuleBuilder         { return rb.add("ip") }
+func (rb *RuleBuilder) IPv4() *RuleBuilder       { return rb.add("ipv4") }
+func (rb *RuleBuilder) IPv6() *RuleBuilder       { return rb.add("ipv6") }
+func (rb *RuleBuilder) Timezone() *RuleBuilder   { return rb.add("timezone") }
+func (rb *RuleBuilder) Distinct() *RuleBuilder   { return rb.add("distinct") }
 
 func (rb *RuleBuilder) Regex(pattern string) *RuleBuilder {
 	return rb.addParam("regex", pattern)
@@ -233,10 +233,12 @@ func (rb *RuleBuilder) ProhibitedUnless(otherField, value string) *RuleBuilder {
 
 func (rb *RuleBuilder) Date() *RuleBuilder { return rb.add("date") }
 
-func (rb *RuleBuilder) Before(date string) *RuleBuilder  { return rb.addParam("before", date) }
-func (rb *RuleBuilder) After(date string) *RuleBuilder   { return rb.addParam("after", date) }
+func (rb *RuleBuilder) Before(date string) *RuleBuilder     { return rb.addParam("before", date) }
+func (rb *RuleBuilder) After(date string) *RuleBuilder      { return rb.addParam("after", date) }
 func (rb *RuleBuilder) DateEquals(date string) *RuleBuilder { return rb.addParam("date_equals", date) }
-func (rb *RuleBuilder) DateFormat(layout string) *RuleBuilder { return rb.addParam("date_format", layout) }
+func (rb *RuleBuilder) DateFormat(layout string) *RuleBuilder {
+	return rb.addParam("date_format", layout)
+}
 
 func (rb *RuleBuilder) BeforeOrEqual(date string) *RuleBuilder {
 	return rb.addParam("before_or_equal", date)
